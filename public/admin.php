@@ -7,32 +7,72 @@ $staff = current_staff();
 $error = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $title = trim($_POST['title'] ?? '');
-    $body = trim($_POST['body'] ?? '');
+    $action = $_POST['action'] ?? 'create';
 
-    if ($title === '' || $body === '') {
-        $error = 'Title and body are required.';
-    } else {
-        $stmt = db()->prepare('
-            INSERT INTO documents (title, body, created_by)
-            VALUES (?, ?, ?)
-        ');
-        $stmt->execute([$title, $body, $staff['id']]);
-        $docId = (int) db()->lastInsertId();
+    if ($action === 'create') {
+        $title = trim($_POST['title'] ?? '');
+        $body = trim($_POST['body'] ?? '');
+        $publish_at = trim($_POST['publish_at'] ?? '');
 
-        audit_log('create', 'document', $docId, ['title' => $title]);
+        if ($title === '' || $body === '') {
+            $error = 'Title and body are required.';
+        } else {
+            $slug = generate_slug($title);
+            $publish_value = $publish_at !== '' ? $publish_at : null;
 
-        header('Location: /admin.php?created=' . $docId);
+            $stmt = db()->prepare('
+                INSERT INTO documents (title, body, created_by, slug, publish_at)
+                VALUES (?, ?, ?, ?, ?)
+            ');
+            $stmt->execute([$title, $body, $staff['id'], $slug, $publish_value]);
+            $docId = (int) db()->lastInsertId();
+
+            $auditDetails = ['title' => $title, 'slug' => $slug];
+            if ($publish_value) {
+                $auditDetails['publish_at'] = $publish_value;
+            }
+            audit_log('create', 'document', $docId, $auditDetails);
+
+            header('Location: /admin.php?created=' . $docId);
+            exit;
+        }
+    } elseif ($action === 'update_schedule') {
+        $docId = (int) ($_POST['doc_id'] ?? 0);
+        $publish_at = trim($_POST['publish_at'] ?? '');
+        $publish_value = $publish_at !== '' ? $publish_at : null;
+
+        $stmt = db()->prepare('UPDATE documents SET publish_at = ? WHERE id = ?');
+        $stmt->execute([$publish_value, $docId]);
+
+        audit_log('update_schedule', 'document', $docId, [
+            'publish_at' => $publish_value ?? 'immediate',
+        ]);
+
+        header('Location: /admin.php?scheduled=' . $docId);
         exit;
     }
 }
 
-$docs = db()->query('
-    SELECT d.*, s.name AS creator_name
-    FROM documents d
-    JOIN staff s ON s.id = d.created_by
-    ORDER BY d.created_at DESC
-')->fetchAll();
+// Search / filter
+$search = trim($_GET['q'] ?? '');
+if ($search !== '') {
+    $stmt = db()->prepare('
+        SELECT d.*, s.name AS creator_name
+        FROM documents d
+        JOIN staff s ON s.id = d.created_by
+        WHERE d.title LIKE ?
+        ORDER BY d.created_at DESC
+    ');
+    $stmt->execute(['%' . $search . '%']);
+    $docs = $stmt->fetchAll();
+} else {
+    $docs = db()->query('
+        SELECT d.*, s.name AS creator_name
+        FROM documents d
+        JOIN staff s ON s.id = d.created_by
+        ORDER BY d.created_at DESC
+    ')->fetchAll();
+}
 
 render_header('Admin', $staff);
 ?>
@@ -44,6 +84,10 @@ render_header('Admin', $staff);
     <div class="banner banner-success">Document #<?= (int) $_GET['created'] ?> created.</div>
 <?php endif ?>
 
+<?php if (!empty($_GET['scheduled'])): ?>
+    <div class="banner banner-success">Schedule updated for document #<?= (int) $_GET['scheduled'] ?>.</div>
+<?php endif ?>
+
 <?php if ($error): ?>
     <div class="banner banner-error"><?= h($error) ?></div>
 <?php endif ?>
@@ -51,6 +95,7 @@ render_header('Admin', $staff);
 <section class="card">
     <h2 class="card-title">New document</h2>
     <form method="post">
+        <input type="hidden" name="action" value="create">
         <div class="form-field">
             <label for="title">Title</label>
             <input type="text" id="title" name="title" required>
@@ -59,20 +104,37 @@ render_header('Admin', $staff);
             <label for="body">Body</label>
             <textarea id="body" name="body" required></textarea>
         </div>
+        <div class="form-field">
+            <label for="publish_at">Publish at <span class="label-hint">(leave blank to publish immediately)</span></label>
+            <input type="datetime-local" id="publish_at" name="publish_at">
+        </div>
         <button type="submit" class="btn">Create document</button>
     </form>
 </section>
 
 <section class="card">
     <h2 class="card-title">Documents</h2>
-    <?php if (empty($docs)): ?>
+    <form method="get" class="search-form">
+        <div class="search-row">
+            <input type="text" name="q" placeholder="Search by title…" value="<?= h($search) ?>" class="search-input">
+            <button type="submit" class="btn btn-search">Search</button>
+            <?php if ($search !== ''): ?>
+                <a href="/admin.php" class="btn-link">Clear</a>
+            <?php endif ?>
+        </div>
+    </form>
+
+    <?php if ($search !== '' && empty($docs)): ?>
+        <p class="empty">No documents matching "<?= h($search) ?>".</p>
+    <?php elseif (empty($docs)): ?>
         <p class="empty">No documents yet.</p>
     <?php else: ?>
         <table class="data">
             <thead>
                 <tr>
-                    <th>ID</th>
+                    <th>Slug</th>
                     <th>Title</th>
+                    <th>Status</th>
                     <th>Creator</th>
                     <th>Created</th>
                     <th></th>
@@ -81,11 +143,21 @@ render_header('Admin', $staff);
             <tbody>
                 <?php foreach ($docs as $d): ?>
                     <tr>
-                        <td class="id">#<?= (int) $d['id'] ?></td>
+                        <td class="id"><?= h($d['slug'] ?? '#' . $d['id']) ?></td>
                         <td><?= h($d['title']) ?></td>
+                        <td>
+                            <?php if (is_published($d)): ?>
+                                <span class="status-badge status-published">Published</span>
+                            <?php else: ?>
+                                <span class="status-badge status-scheduled">Scheduled <?= h($d['publish_at']) ?></span>
+                            <?php endif ?>
+                        </td>
                         <td><?= h($d['creator_name']) ?></td>
                         <td><?= h($d['created_at']) ?></td>
-                        <td><a href="/share.php?doc=<?= (int) $d['id'] ?>" class="btn-link">Create share →</a></td>
+                        <td class="actions-cell">
+                            <a href="/share.php?doc=<?= (int) $d['id'] ?>" class="btn-link">Share →</a>
+                            <a href="/schedule.php?doc=<?= (int) $d['id'] ?>" class="btn-link">Schedule</a>
+                        </td>
                     </tr>
                 <?php endforeach ?>
             </tbody>

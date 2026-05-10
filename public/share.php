@@ -37,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $shareId = (int) db()->lastInsertId();
         audit_log('create', 'share', $shareId, [
             'document_id' => $doc['id'],
+            'slug' => $doc['slug'],
             'recipient_email' => $email,
         ]);
         $created_token = $token;
@@ -49,7 +50,16 @@ render_header('Share · ' . $doc['title'], $staff);
 <a href="/admin.php" class="back-link">← back to admin</a>
 
 <h1 class="page-title">Share "<?= h($doc['title']) ?>"</h1>
-<p class="page-subtitle">Generate a one-time link for a recipient.</p>
+<p class="page-subtitle">
+    Slug: <code><?= h($doc['slug'] ?? '#' . $doc['id']) ?></code> · Generate a one-time link for a recipient.
+</p>
+
+<?php if (!is_published($doc)): ?>
+    <div class="banner banner-warn">
+        This document is scheduled for <?= h($doc['publish_at']) ?>.
+        Recipients will see a "not yet available" message until then.
+    </div>
+<?php endif ?>
 
 <?php if ($error): ?>
     <div class="banner banner-error"><?= h($error) ?></div>
