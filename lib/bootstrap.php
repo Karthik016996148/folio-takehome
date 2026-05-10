@@ -46,3 +46,28 @@ function random_token(int $bytes = 16): string {
 function h(string $s): string {
     return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 }
+
+/**
+ * Generate a URL-safe slug from a title with a short random suffix.
+ * Example: "Welcome Packet" → "welcome-packet-3k7x"
+ */
+function generate_slug(string $title): string {
+    $base = strtolower(trim($title));
+    $base = preg_replace('/[^a-z0-9]+/', '-', $base);
+    $base = trim($base, '-');
+    $base = substr($base, 0, 40);
+    $base = rtrim($base, '-');
+
+    $suffix = substr(bin2hex(random_bytes(2)), 0, 4);
+    return $base . '-' . $suffix;
+}
+
+/**
+ * Check if a document is currently published (publish_at is NULL or in the past).
+ */
+function is_published(array $doc): bool {
+    if (empty($doc['publish_at'])) {
+        return true;
+    }
+    return strtotime($doc['publish_at']) <= time();
+}

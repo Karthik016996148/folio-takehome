@@ -1,0 +1,36 @@
+# Folio Project Rules
+
+## Stack
+- PHP 8.3, SQLite, no framework
+- Docker Compose for local development
+- Built-in PHP dev server (no Apache/Nginx)
+
+## Conventions
+- Functions live in `lib/bootstrap.php` (helpers) or `lib/migrate.php` (migration runner)
+- Pages are standalone PHP files in `public/`
+- All user-facing strings must be escaped with `h()` (wrapper for htmlspecialchars)
+- Database access via the `db()` singleton (PDO with exceptions enabled)
+- Schema changes MUST go through numbered migration files in `migrations/` — never edit `schema.sql`
+
+## Patterns to Follow
+- Audit all state-changing actions: `audit_log($action, $entity_type, $entity_id, $details)`
+- Use prepared statements for ALL queries (no string interpolation in SQL)
+- POST/redirect/GET for form submissions
+- Keep pages self-contained: each public/*.php handles its own routing, validation, and rendering
+
+## Testing
+- Tests live in `tests/test.php`, use the `test(name, fn)` / `assert_true()` pattern
+- Tests re-seed the database before running (always start from known state)
+- Run via: `docker compose exec app php tests/test.php`
+
+## Migration Rules
+- File naming: `NNN_description.php` (e.g., `001_add_publish_at_to_documents.php`)
+- Each migration returns a closure: `return function (PDO $pdo): void { ... };`
+- Migrations run in numeric order, tracked in `_migrations` table
+- Must be idempotent when combined with the tracking table (won't re-run)
+
+## Style
+- 4-space indentation in PHP
+- Single quotes for strings unless interpolation needed
+- Type hints on function signatures
+- No closing `?>` tag in pure-PHP files (prevents accidental whitespace)
