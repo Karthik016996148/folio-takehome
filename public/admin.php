@@ -36,20 +36,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: /admin.php?created=' . $docId);
             exit;
         }
-    } elseif ($action === 'update_schedule') {
-        $docId = (int) ($_POST['doc_id'] ?? 0);
-        $publish_at = trim($_POST['publish_at'] ?? '');
-        $publish_value = $publish_at !== '' ? $publish_at : null;
-
-        $stmt = db()->prepare('UPDATE documents SET publish_at = ? WHERE id = ?');
-        $stmt->execute([$publish_value, $docId]);
-
-        audit_log('update_schedule', 'document', $docId, [
-            'publish_at' => $publish_value ?? 'immediate',
-        ]);
-
-        header('Location: /admin.php?scheduled=' . $docId);
-        exit;
     }
 }
 
@@ -84,9 +70,6 @@ render_header('Admin', $staff);
     <div class="banner banner-success">Document #<?= (int) $_GET['created'] ?> created.</div>
 <?php endif ?>
 
-<?php if (!empty($_GET['scheduled'])): ?>
-    <div class="banner banner-success">Schedule updated for document #<?= (int) $_GET['scheduled'] ?>.</div>
-<?php endif ?>
 
 <?php if ($error): ?>
     <div class="banner banner-error"><?= h($error) ?></div>
